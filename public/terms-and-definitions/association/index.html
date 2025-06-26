@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jogo de Associação</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: auto; padding: 10px; }
+    input, select, button { margin: 5px 0; padding: 6px; width: 100%; max-width: 300px; }
+    #pairs div { margin-bottom: 8px; }
+    .game-section { display: flex; gap: 20px; margin-top: 20px; }
+    .draggable-container, .droppable-container { border: 1px solid #ccc; min-height: 150px; padding: 10px; flex: 1; }
+    .term, .definition { padding: 6px; margin: 5px 0; background: #ddd; cursor: grab; }
+    .term[draggable="false"] { cursor: default; background: #4CAF50; color: white; }
+    .correct { border: 2px solid #4CAF50; }
+    .wrong { border: 2px solid #f44336; }
+    #feedback { margin-top: 10px; font-weight: bold; }
+    #timer { font-size: 1.5em; margin-top: 10px; }
+    #user-games div { margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+  <h1>Jogo de Associação: Termos e Definições</h1>
+
+  <!-- Login simples -->
+  <div id="login-panel">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Usuário" />
+    <input type="password" id="password" placeholder="Senha" />
+    <button id="login-btn">Entrar</button>
+    <button id="logout-btn" style="display:none;">Sair</button>
+    <div id="login-result"></div>
+  </div>
+
+  <!-- Criar novo jogo -->
+  <div id="creator-panel" style="display:none;">
+    <h2>Criar Novo Jogo</h2>
+    <input type="text" id="title" placeholder="Título do jogo" />
+    <div id="pairs">
+      <div>
+        <input type="text" class="term" placeholder="Termo" />
+        <input type="text" class="definition" placeholder="Definição" />
+      </div>
+    </div>
+    <button id="add-pair-btn">Adicionar Par</button>
+    <button id="save-game-btn">Salvar Jogo</button>
+    <div id="result" style="color: green;"></div>
+  </div>
+
+  <!-- Lista de jogos do usuário -->
+  <div id="user-games-panel" style="display:none;">
+    <h2>Seus Jogos</h2>
+    <div id="user-games"></div>
+  </div>
+
+  <!-- Selecionar jogo público para jogar -->
+  <div id="public-games-panel" style="display:none;">
+    <h2>Jogos Públicos</h2>
+    <select id="file-dropdown">
+      <option value="">Selecione um jogo...</option>
+    </select>
+  </div>
+
+  <!-- Cronômetro e feedback -->
+  <div id="timer">00:00</div>
+  <div id="feedback"></div>
+  <button id="restart-btn" style="display:none;">Reiniciar Jogo</button>
+
+  <!-- Área do jogo -->
+  <div class="game-section" style="display:none;">
+    <div>
+      <h3>Termos</h3>
+      <div id="terms" class="draggable-container"></div>
+    </div>
+    <div>
+      <h3>Definições</h3>
+      <div id="definitions" class="droppable-container"></div>
+    </div>
+  </div>
+
+<script>
+  // --- Variáveis ---
+  let correctMatches = 0;
+  let wrongMatches = 0;
+  let timerInterval;
+  let startTime;
+
+  // --- Elementos ---
+  const loginPanel = document.getElementById('login-panel');
+  const usernameInput = document.getElementById('username');
+  const passwordInput = document.getElementById('password');
+  const loginBtn = document.getElementById('login-btn');
+  const logoutBtn = document.getElementById('logout-btn');
+  const loginResult = document.getElementById('login-result');
+
+  const creatorPanel = document.getElementById('creator-panel');
+  const titleInput = document.getElementById('title');
+  const pairsContainer = document.getElementById('pairs');
+  const addPairBtn = document.getElementById('add-pair-btn');
+  const saveGameBtn = document.getElementById('save-game-btn');
+  const resultDiv = document.getElementById('result');
+
+  const userGamesPanel = document.getElementById('user-games-panel');
+  const userGamesContainer = document.getElementById('user-games');
+
+  const publicGamesPanel = document.getElementById('public-games-panel');
+  const fileDropdown = document.getElementById('file-dropdown');
+
+  const timerDisplay = document.getElementById('timer');
+  const feedbackDisplay = document.getElementById('feedback');
+  const restartBtn = document.getElementById('restart-btn');
+
+  const termsContainer = document.getElementById('terms');
+  const definitionsContainer = document.getElementById('definitions');
+  const gameSection = document.querySelector('.game-section');
+
+  // --- Sons ---
+  const correctSound = new Audio('../sounds/bell.wav');
+  const wrongSound = new Audio('../sounds/caught.wav');
+  const endSound = new Audio('../sounds/win.wav');
+
+  // --- Função para login ---
+  async function login() {
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value.trim();
+    if (!username || !password) {
+      loginResult.textContent = 'Informe usuário e senha';
+      return;
+    }
+    try {
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({username, password})
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        loginResult.textContent = 'Erro: ' + text;
+        return;
+      }
+      loginResult.textContent = 'Logado com sucesso!';
+      loginPanel.style.display = 'none';
+      logoutBtn.style.display = 'inline-block';
+      creatorPanel.style.display = 'block';
+      userGamesPanel.style.display = 'block';
+      publicGamesPanel.style.display = 'block';
+      restartBtn.style.display = 'inline-block';
+
+      await loadPublicGames();
+      await loadUserGames();
+    } catch(e) {
+      loginResult.textContent = 'Erro no login';
+    }
+  }
+
+  // --- Logout ---
+  async function logout() {
+    await fetch('/logout', { method: 'POST' });
+    loginPanel.style.display = 'block';
+    logoutBtn.style.display = 'none';
+    creatorPanel.style.display = 'none';
+    userGamesPanel.style.display = 'none';
+    publicGamesPanel.style.display = 'none';
+    restartBtn.style.display = 'none';
+    loginResult.textContent = '';
+    clearGame();
+  }
+
+  loginBtn.onclick = login;
+  logoutBtn.onclick = logout;
+
+  // --- Adicionar novo par ---
+  addPairBtn.onclick = () => {
+    const div = document.createElement('div');
+    div.innerHTML = `
+      <input type="text" class="term" placeholder="Termo" />
+      <input type="text" class="definition" placeholder="Definição" />
+    `;
+    pairsContainer.appendChild(div);
+  };
+
+  // --- Salvar jogo ---
+  saveGameBtn.onclick = async () => {
+    const title = titleInput.value.trim();
+    const terms = document.querySelectorAll('.term');
+    const definitions = document.querySelectorAll('.definition');
+    const data = [];
+
+    for(let i=0; i<terms.length; i++) {
+      const term = terms[i].value.trim();
+      const def = definitions[i].value.trim();
+      if(term && def) data.push({term, definition: def});
+    }
+
+    if(!title) {
+      resultDiv.textContent = 'Informe o título do jogo';
+      return;
+    }
+    if(data.length === 0) {
+      resultDiv.textContent = 'Adicione ao menos um par termo-definição';
+      return;
+    }
+
+    try {
+      const res = await fetch('/games', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({title, type:'associacao', data})
+      });
+      if(!res.ok) {
+        const text = await res.text();
+        resultDiv.textContent = 'Erro: ' + text;
+        return;
+      }
+      resultDiv.textContent = 'Jogo salvo com sucesso!';
+      titleInput.value = '';
+      pairsContainer.innerHTML = `
+        <div>
+          <input type="text" class="term" placeholder="Termo" />
+          <input type="text" class="definition" placeholder="Definição" />
+        </div>
+      `;
+      await loadUserGames();
+      await loadPublicGames();
+    } catch(e) {
+      resultDiv.textContent = 'Erro ao salvar jogo';
+    }
+  };
+
+  // --- Carregar jogos públicos ---
+  async function loadPublicGames() {
+    try {
+      const res = await fetch('/public-games');
+      if(!res.ok) throw new Error('Erro ao carregar jogos públicos');
+      const games = await res.json();
+
+      fileDropdown.innerHTML = `<option value="">Selecione um jogo...</option>`;
+      games.forEach(game => {
+        if(game.type === 'associacao') {
+          const option = document.createElement('option');
+          option.value = game._id;
+          option.textContent = game.title;
+          fileDropdown.appendChild(option);
+        }
+      });
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  // --- Carregar jogos do usuário ---
+  async function loadUserGames() {
+    try {
+      const res = await fetch('/games');
+      if(!res.ok) throw new Error('Erro ao carregar seus jogos');
+      const games = await res.json();
+
+      userGamesContainer.innerHTML = '';
+      if(games.length === 0) {
+        userGamesContainer.textContent = 'Você não tem jogos criados.';
+        return;
+      }
+
+      games.forEach(game => {
+        const div = document.createElement('div');
+        div.textContent = `${game.title} - ${game.public ? 'Público' : 'Privado'}`;
+
+        if(!game.public) {
+          const btn = document.createElement('button');
+          btn.textContent = 'Tornar Público';
+          btn.onclick = () => tornarJogoPublico(game._id);
+          div.appendChild(btn);
+        }
+        userGamesContainer.appendChild(div);
+      });
+    } catch(e) {
+      userGamesContainer.textContent = 'Erro ao carregar seus jogos.';
+      console.error(e);
+    }
+  }
+
+  // --- Tornar jogo público ---
+  async function tornarJogoPublico(gameId) {
+    try {
+      const res = await fetch(`/games/${gameId}/public`, { method: 'POST' });
+      if(!res.ok) {
+        const text = await res.text();
+        alert('Erro: ' + text);
+        return;
+      }
+      alert('Jogo agora é público!');
+      await loadUserGames();
+      await loadPublicGames();
+    } catch(e) {
+      alert('Erro ao tornar público');
+      console.error(e);
+    }
+  }
+
+  // --- Carregar dados do jogo selecionado para jogar ---
+  fileDropdown.onchange = async () => {
+    const gameId = fileDropdown.value;
+    if(!gameId) {
+      clearGame();
+      return;
+    }
+    try {
+      const res = await fetch(`/public-games/${gameId}`);
+      if(!res.ok) throw new Error('Jogo não encontrado');
+      const game = await res.json();
+
+      correctMatches = 0;
+      wrongMatches = 0;
+      feedbackDisplay.textContent = '';
+      resetTimer();
+
+      renderDefinitionsAndTerms(game.data);
+      startTimer();
+      gameSection.style.display = 'flex';
+      restartBtn.style.display = 'inline-block';
+    } catch(e) {
+      alert(e.message);
+    }
+  };
+
+  // --- Renderizar termos e definições ---
+  function shuffleArray(array) {
+    return array.sort(() => Math.random() - 0.5);
+  }
+
+  function renderDefinitionsAndTerms(data) {
+    const termsWithDefinitions = data.map((item, idx) => ({
+      term: item.term,
+      definition: item.definition,
+      id: idx
+    }));
+
+    const shuffledTerms = shuffleArray(termsWithDefinitions.map(item => item.term));
+    const shuffledDefinitions = shuffleArray(termsWithDefinitions.map(item => item.definition));
+
+    definitionsContainer.innerHTML = '';
+    termsContainer.innerHTML = '';
+
+    shuffledDefinitions.forEach((definition, idx) => {
+      const div = document.createElement('div');
+      div.classList.add('definition');
+      div.id = `definition-${idx}`;
+      div.textContent = definition;
+      definitionsContainer.appendChild(div);
+    });
+
+    shuffledTerms.forEach((term, idx) => {
+      const div = document.createElement('div');
+      div.classList.add('term');
+      div.setAttribute('draggable', 'true');
+      div.id = `term-${idx}`;
+
+      const correctDefinition = termsWithDefinitions.find(item => item.term === term).definition;
+      div.dataset.correctDefinition = `definition-${shuffledDefinitions.indexOf(correctDefinition)}`;
+      div.textContent = term;
+      termsContainer.appendChild(div);
+    });
+
+    enableDragAndDrop();
+  }
+
+  // --- Drag and Drop ---
+  function enableDragAndDrop() {
+    const definitions = document.querySelectorAll('.definition');
+    const terms = document.querySelectorAll('.term');
+
+    terms.forEach(term => {
+      term.addEventListener('dragstart', e => {
+        e.target.classList.add('dragging');
+        e.dataTransfer.setData('termId', e.target.id);
+      });
+      term.addEventListener('dragend', e => {
+        e.target.classList.remove('dragging');
+      });
+    });
+
+    definitions.forEach(definition => {
+      definition.addEventListener('dragover', e => e.preventDefault());
+
+      definition.addEventListener('drop', e => {
+        e.preventDefault();
+        const termId = e.dataTransfer.getData('termId');
+        const term = document.getElementById(termId);
+
+        if (term.dataset.correctDefinition === definition.id) {
+          correctMatches++;
+          definition.appendChild(term);
+          term.setAttribute('draggable', 'false');
+          term.style.backgroundColor = '#4CAF50';
+          definition.classList.add('correct');
+          correctSound.play();
+        } else {
+          wrongMatches++;
+          term.style.backgroundColor = '#f44336';
+          definition.classList.add('wrong');
+          wrongSound.play();
+        }
+
+        updateFeedback();
+
+        if (correctMatches === terms.length) {
+          endGame();
+          alert(`Parabéns! Você terminou o jogo! Acertos: ${correctMatches} | Erros: ${wrongMatches}`);
+        }
+      });
+    });
+  }
+
+  // --- Atualizar feedback ---
+  function updateFeedback() {
+    feedbackDisplay.textContent = `Acertos: ${correctMatches} | Erros: ${wrongMatches}`;
+  }
+
+  // --- Timer ---
+  function startTimer() {
+    startTime = Date.now();
+    timerInterval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      const min = String(Math.floor(elapsed / 60000)).padStart(2, '0');
+      const sec = String(Math.floor((elapsed % 60000) / 1000)).padStart(2, '0');
+      timerDisplay.textContent = `${min}:${sec}`;
+    }, 1000);
+  }
+
+  function resetTimer() {
+    clearInterval(timerInterval);
+    timerDisplay.textContent = '00:00';
+  }
+
+  // --- Finalizar jogo ---
+  function endGame() {
+    resetTimer();
+    endSound.play();
+    feedbackDisplay.textContent += ` | Tempo final: ${timerDisplay.textContent}`;
+  }
+
+  // --- Reiniciar jogo ---
+  restartBtn.onclick = () => {
+    const gameId = fileDropdown.value;
+    if(gameId) {
+      fileDropdown.dispatchEvent(new Event('change'));
+      feedbackDisplay.textContent = '';
+      correctMatches = 0;
+      wrongMatches = 0;
+    } else {
+      clearGame();
+    }
+  };
+
+  function clearGame() {
+    definitionsContainer.innerHTML = '';
+    termsContainer.innerHTML = '';
+    feedbackDisplay.textContent = '';
+    resetTimer();
+    correctMatches = 0;
+    wrongMatches = 0;
+    gameSection.style.display = 'none';
+    restartBtn.style.display = 'none';
+  }
+
+  // --- Inicialização ---
+  (async () => {
+    // Check if user already logged in
+    try {
+      const res = await fetch('/me');
+      if(res.ok) {
+        loginPanel.style.display = 'none';
+        logoutBtn.style.display = 'inline-block';
+        creatorPanel.style.display = 'block';
+        userGamesPanel.style.display = 'block';
+        publicGamesPanel.style.display = 'block';
+        restartBtn.style.display = 'inline-block';
+        await loadPublicGames();
+        await loadUserGames();
+      }
+    } catch(e) {
+      // Não logado
+    }
+  })();
+
+</script>
+</body>
+</html>

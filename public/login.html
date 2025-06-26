@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Login</title>
+</head>
+<body>
+  <h2>Login</h2>
+
+  <form id="login-form">
+    <label>Usuário:</label>
+    <input type="text" name="username" required><br>
+    <label>Senha:</label>
+    <input type="password" name="password" required><br>
+    <button type="submit">Entrar</button>
+  </form>
+
+  <p><a href="/register.html">Cadastrar nova conta</a></p>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async function (e) {
+      e.preventDefault(); // Impede o envio padrão
+
+      const form = e.target;
+      const username = form.username.value;
+      const password = form.password.value;
+
+      try {
+        const response = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        if (response.ok) {
+          // Redireciona para index.html após login
+          window.location.href = '/index.html';
+        } else {
+          const erro = await response.text();
+          alert('Erro no login: ' + erro);
+        }
+      } catch (err) {
+        alert('Erro ao conectar com o servidor.');
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>
